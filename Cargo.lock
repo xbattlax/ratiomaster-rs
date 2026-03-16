@@ -3048,7 +3048,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ratiomaster-rust"
+name = "ratiomaster-rs"
 version = "0.1.0"
 dependencies = [
  "flate2",
