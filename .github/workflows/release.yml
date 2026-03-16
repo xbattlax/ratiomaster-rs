@@ -1,0 +1,236 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: tar.gz
+            use_cross: false
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            archive: tar.gz
+            use_cross: false
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            use_cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            use_cross: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            use_cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install musl-tools (Linux musl)
+        if: contains(matrix.target, 'musl') && !matrix.use_cross
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install cross (cross-compile)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binaries
+        if: "!matrix.use_cross && !contains(matrix.target, 'musl')"
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+
+      - name: Build release binaries (musl, no GUI)
+        if: "!matrix.use_cross && contains(matrix.target, 'musl')"
+        run: cargo build --workspace --exclude ratiomaster-gui --release --target ${{ matrix.target }}
+
+      - name: Build release binaries (cross, no GUI)
+        if: matrix.use_cross
+        run: cross build --workspace --exclude ratiomaster-gui --release --target ${{ matrix.target }}
+
+      # ── macOS: Import signing certificate ──
+      - name: Import Apple signing certificate
+        if: contains(matrix.target, 'apple-darwin')
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 16)
+
+          # Decode certificate
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+          # Verify
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      # ── macOS: Sign, bundle .app, create DMG ──
+      - name: Bundle and sign macOS .app
+        if: contains(matrix.target, 'apple-darwin')
+        run: |
+          IDENTITY=$(security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)"/\1/')
+          TARGET=${{ matrix.target }}
+
+          # Sign all binaries
+          for bin in ratiomaster-cli ratiomaster-tui ratiomaster-gui; do
+            if [ -f "target/${TARGET}/release/${bin}" ]; then
+              codesign --force --options runtime --sign "${IDENTITY}" \
+                "target/${TARGET}/release/${bin}"
+            fi
+          done
+
+          # Create .app bundle
+          APP="RatioMaster.app"
+          mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
+          cp "target/${TARGET}/release/ratiomaster-gui" "${APP}/Contents/MacOS/"
+          cp assets/Info.plist "${APP}/Contents/"
+
+          # Generate .icns
+          if [ -f assets/icon.png ]; then
+            ICONSET="AppIcon.iconset"
+            mkdir -p "${ICONSET}"
+            for sz in 16 32 64 128 256 512 1024; do
+              sips -z $sz $sz assets/icon.png --out "${ICONSET}/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+            done
+            iconutil -c icns "${ICONSET}" -o "${APP}/Contents/Resources/AppIcon.icns" 2>/dev/null || true
+            rm -rf "${ICONSET}"
+          fi
+
+          # Sign the .app bundle
+          codesign --force --deep --options runtime --sign "${IDENTITY}" "${APP}"
+          codesign --verify --verbose=2 "${APP}"
+
+          # Create DMG
+          DMG_DIR="dmg-staging"
+          mkdir -p "${DMG_DIR}"
+          cp -R "${APP}" "${DMG_DIR}/"
+          ln -s /Applications "${DMG_DIR}/Applications"
+          hdiutil create -volname "RatioMaster" \
+            -srcfolder "${DMG_DIR}" -ov -format UDZO \
+            "RatioMaster-${{ matrix.target }}.dmg"
+          rm -rf "${DMG_DIR}"
+
+          # Sign the DMG
+          codesign --force --sign "${IDENTITY}" "RatioMaster-${{ matrix.target }}.dmg"
+
+      # ── macOS: Notarize (submit only, don't wait) ──
+      - name: Submit notarization
+        if: contains(matrix.target, 'apple-darwin')
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          DMG="RatioMaster-${{ matrix.target }}.dmg"
+
+          xcrun notarytool submit "${DMG}" \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            || echo "Notarization submission failed (non-blocking)"
+
+          echo "Notarization submitted. Staple manually later with:"
+          echo "  xcrun notarytool history --apple-id ... --team-id ..."
+          echo "  xcrun stapler staple RatioMaster.dmg"
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/ratiomaster-cli dist/
+          cp target/${{ matrix.target }}/release/ratiomaster-tui dist/
+          if [ -d "RatioMaster.app" ]; then
+            cp -R RatioMaster.app dist/
+            cp target/${{ matrix.target }}/release/ratiomaster-gui dist/ || true
+          else
+            cp target/${{ matrix.target }}/release/ratiomaster-gui dist/ || true
+          fi
+          if [ -f "assets/ratiomaster.desktop" ]; then
+            cp assets/ratiomaster.desktop dist/ || true
+          fi
+          cd dist
+          tar czf ../ratiomaster-${{ matrix.target }}.tar.gz *
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item "target/${{ matrix.target }}/release/ratiomaster-cli.exe" dist/
+          Copy-Item "target/${{ matrix.target }}/release/ratiomaster-tui.exe" dist/
+          Copy-Item "target/${{ matrix.target }}/release/ratiomaster-gui.exe" dist/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/* -DestinationPath "ratiomaster-${{ matrix.target }}.zip"
+
+      - name: Generate checksums (Unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          shasum -a 256 ratiomaster-${{ matrix.target }}.tar.gz > ratiomaster-${{ matrix.target }}.tar.gz.sha256
+          if [ -f "RatioMaster-${{ matrix.target }}.dmg" ]; then
+            shasum -a 256 "RatioMaster-${{ matrix.target }}.dmg" >> ratiomaster-${{ matrix.target }}.tar.gz.sha256
+          fi
+
+      - name: Generate checksums (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Get-FileHash "ratiomaster-${{ matrix.target }}.zip" -Algorithm SHA256 | Format-List | Out-File "ratiomaster-${{ matrix.target }}.zip.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            ratiomaster-${{ matrix.target }}.*
+            RatioMaster-${{ matrix.target }}.dmg
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ratiomaster-*.tar.gz
+            ratiomaster-*.zip
+            ratiomaster-*.sha256
+            RatioMaster-*.dmg

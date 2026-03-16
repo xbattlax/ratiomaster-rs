@@ -1,0 +1,21 @@
+[package]
+name = "ratiomaster-gui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native desktop GUI for RatioMaster-Rust using egui/eframe"
+
+[[bin]]
+name = "ratiomaster-gui"
+path = "src/main.rs"
+
+[dependencies]
+ratiomaster-core.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+eframe = "0.31"
+rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }

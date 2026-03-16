@@ -1,0 +1,72 @@
+[package]
+name = "ratiomaster-rs"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+members = [
+    "crates/ratiomaster-core",
+    "crates/ratiomaster-cli",
+    "crates/ratiomaster-tui",
+    "crates/ratiomaster-gui",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/xbattlax/ratiomaster-rs"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Hashing
+sha1 = "0.10"
+
+# Compression
+flate2 = "1.0"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# URL encoding
+percent-encoding = "2.3"
+
+# Random
+rand = "0.8"
+
+# Platform paths
+dirs = "5.0"
+
+# System info
+libc = "0.2"
+
+# Error handling
+thiserror = "1.0"
+
+# Internal crates
+ratiomaster-core = { path = "crates/ratiomaster-core" }
+
+[dev-dependencies]
+ratiomaster-core = { path = "crates/ratiomaster-core" }
+flate2 = "1.0"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

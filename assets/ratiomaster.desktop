@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RatioMaster
+Comment=BitTorrent tracker communication tool
+Exec=ratiomaster-gui
+Icon=ratiomaster
+Categories=Network;P2P;
+MimeType=application/x-bittorrent;
+Terminal=false

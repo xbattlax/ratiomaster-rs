@@ -1,0 +1,28 @@
+[package]
+name = "ratiomaster-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core library for RatioMaster: BEncode codec, torrent parsing, tracker communication, and client emulation"
+
+[dependencies]
+sha1 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+percent-encoding = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+flate2 = { workspace = true }
+tokio = { workspace = true }
+tokio-rustls = "0.26"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"
+libc = { workspace = true }
+gethostname = "1.0"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }
