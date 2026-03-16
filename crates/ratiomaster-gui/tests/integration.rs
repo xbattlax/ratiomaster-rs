@@ -103,7 +103,9 @@ fn get_unknown_profile_returns_none() {
 fn utorrent_332_profile_exists() {
     // The default client in the GUI
     let all = profiles::all_profiles();
-    let has_utorrent = all.iter().any(|p| p.name.contains("uTorrent") || p.name.contains("3.3.2"));
+    let has_utorrent = all
+        .iter()
+        .any(|p| p.name.contains("uTorrent") || p.name.contains("3.3.2"));
     assert!(has_utorrent, "uTorrent 3.3.2 profile should exist");
 }
 
@@ -193,10 +195,22 @@ fn format_duration_values() {
         format!("{h:02}:{m:02}:{s:02}")
     }
 
-    assert_eq!(format_duration(std::time::Duration::from_secs(0)), "00:00:00");
-    assert_eq!(format_duration(std::time::Duration::from_secs(61)), "00:01:01");
-    assert_eq!(format_duration(std::time::Duration::from_secs(3661)), "01:01:01");
-    assert_eq!(format_duration(std::time::Duration::from_secs(86399)), "23:59:59");
+    assert_eq!(
+        format_duration(std::time::Duration::from_secs(0)),
+        "00:00:00"
+    );
+    assert_eq!(
+        format_duration(std::time::Duration::from_secs(61)),
+        "00:01:01"
+    );
+    assert_eq!(
+        format_duration(std::time::Duration::from_secs(3661)),
+        "01:01:01"
+    );
+    assert_eq!(
+        format_duration(std::time::Duration::from_secs(86399)),
+        "23:59:59"
+    );
 }
 
 // ── Parse Helpers ──
@@ -280,8 +294,8 @@ fn proxy_config_none() {
 
 #[test]
 fn proxy_config_socks5_with_credentials() {
-    use ratiomaster_core::proxy::ProxyConfig;
     use ratiomaster_core::proxy::socks5::Credentials;
+    use ratiomaster_core::proxy::ProxyConfig;
 
     let config = ProxyConfig::Socks5 {
         proxy_host: "127.0.0.1".into(),
@@ -292,7 +306,12 @@ fn proxy_config_socks5_with_credentials() {
         }),
     };
 
-    if let ProxyConfig::Socks5 { proxy_host, proxy_port, credentials } = &config {
+    if let ProxyConfig::Socks5 {
+        proxy_host,
+        proxy_port,
+        credentials,
+    } = &config
+    {
         assert_eq!(proxy_host, "127.0.0.1");
         assert_eq!(*proxy_port, 1080);
         assert!(credentials.is_some());

@@ -69,7 +69,11 @@ impl RatioMasterApp {
         tab.scrape = self.settings.scrape;
         tab.ignore_failure = self.settings.ignore_failure;
         // Apply default client if found
-        if let Some(idx) = tab.client_names.iter().position(|n| n == &self.settings.default_client) {
+        if let Some(idx) = tab
+            .client_names
+            .iter()
+            .position(|n| n == &self.settings.default_client)
+        {
             tab.selected_client = idx;
         }
         self.tabs.push(tab);
@@ -324,7 +328,11 @@ impl eframe::App for RatioMasterApp {
                     }
                     ui.separator();
                     let is_dark = ctx.style().visuals.dark_mode;
-                    let theme_label = if is_dark { "Switch to Light Mode" } else { "Switch to Dark Mode" };
+                    let theme_label = if is_dark {
+                        "Switch to Light Mode"
+                    } else {
+                        "Switch to Dark Mode"
+                    };
                     if ui.button(theme_label).clicked() {
                         ui.close_menu();
                         let new_theme = if is_dark { Theme::Light } else { Theme::Dark };

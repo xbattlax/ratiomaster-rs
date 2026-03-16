@@ -13,7 +13,6 @@ impl Theme {
             Theme::Light => Theme::Dark,
         };
     }
-
 }
 
 /// Accent blue used for highlights and active elements.
