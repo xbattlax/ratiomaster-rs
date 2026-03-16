@@ -155,17 +155,34 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          DMG="RatioMaster-${{ matrix.target }}.dmg"
+          TARGET=${{ matrix.target }}
 
-          xcrun notarytool submit "${DMG}" \
+          # Notarize DMG
+          xcrun notarytool submit "RatioMaster-${TARGET}.dmg" \
             --apple-id "${APPLE_ID}" \
             --team-id "${APPLE_TEAM_ID}" \
             --password "${APPLE_APP_PASSWORD}" \
-            || echo "Notarization submission failed (non-blocking)"
+            || echo "DMG notarization submission failed (non-blocking)"
 
-          echo "Notarization submitted. Staple manually later with:"
-          echo "  xcrun notarytool history --apple-id ... --team-id ..."
-          echo "  xcrun stapler staple RatioMaster.dmg"
+          # Notarize individual binaries (zip required by Apple)
+          BINARIES_ZIP="ratiomaster-binaries-${TARGET}.zip"
+          ditto -c -k --keepParent \
+            target/${TARGET}/release/ratiomaster-cli \
+            target/${TARGET}/release/ratiomaster-tui \
+            target/${TARGET}/release/ratiomaster-gui \
+            "${BINARIES_ZIP}" 2>/dev/null || \
+          zip -j "${BINARIES_ZIP}" \
+            target/${TARGET}/release/ratiomaster-cli \
+            target/${TARGET}/release/ratiomaster-tui \
+            target/${TARGET}/release/ratiomaster-gui
+
+          xcrun notarytool submit "${BINARIES_ZIP}" \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            || echo "Binaries notarization submission failed (non-blocking)"
+
+          rm -f "${BINARIES_ZIP}"
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
