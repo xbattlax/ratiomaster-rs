@@ -1,12 +1,18 @@
 [package]
 name = "ratiomaster-core"
-version = "0.1.0"
+version = "1.1.0"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core library for RatioMaster: BEncode codec, torrent parsing, tracker communication, and client emulation"
 
+[features]
+default = []
+keyring = ["dep:keyring"]
+
 [dependencies]
+keyring = { version = "3", optional = true }
 sha1 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -22,7 +28,30 @@ tokio-rustls = "0.26"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "0.26"
 libc = { workspace = true }
+base64 = { workspace = true }
 gethostname = "1.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full"] }
+proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "bencode_bench"
+harness = false
+
+[[bench]]
+name = "url_encode_bench"
+harness = false
+
+[[bench]]
+name = "torrent_bench"
+harness = false
+
+[[bench]]
+name = "speed_bench"
+harness = false
+
+[[bench]]
+name = "generator_bench"
+harness = false

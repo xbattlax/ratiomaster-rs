@@ -1,6 +1,7 @@
 /// Batch operations for managing multiple Engine instances.
 ///
 /// Allows starting, stopping, and updating multiple torrents concurrently.
+use tokio::sync::{mpsc, watch};
 use tracing::{error, info};
 
 use crate::client::ClientProfile;
@@ -11,8 +12,10 @@ use super::{Engine, EngineConfig, EngineError};
 
 /// An entry in the batch engine.
 struct BatchEntry {
-    engine: Engine,
+    engine: Option<Engine>,
     handle: Option<tokio::task::JoinHandle<Result<(), EngineError>>>,
+    shutdown_tx: watch::Sender<bool>,
+    force_announce_tx: mpsc::Sender<()>,
 }
 
 /// Manages multiple `Engine` instances for batch torrent operations.
@@ -37,9 +40,13 @@ impl BatchEngine {
         config: EngineConfig,
     ) {
         let engine = Engine::new(torrent, profile, proxy, config);
+        let shutdown_tx = engine.shutdown_handle();
+        let force_announce_tx = engine.force_announce_handle();
         self.entries.push(BatchEntry {
-            engine,
+            engine: Some(engine),
             handle: None,
+            shutdown_tx,
+            force_announce_tx,
         });
     }
 
@@ -64,17 +71,9 @@ impl BatchEngine {
                 continue; // already running
             }
 
-            // Take ownership of the engine for the spawned task
-            let shutdown_tx = entry.engine.shutdown_handle();
-            let mut engine = std::mem::replace(
-                &mut entry.engine,
-                // Placeholder — the real engine is moved into the task.
-                // We keep the shutdown handle to control it.
-                create_placeholder_engine(),
-            );
-
-            // Restore the shutdown sender so we can still control the placeholder
-            entry.engine.shutdown_tx = shutdown_tx;
+            let Some(mut engine) = entry.engine.take() else {
+                continue; // already taken
+            };
 
             let handle = tokio::spawn(async move {
                 let result = engine.run().await;
@@ -92,7 +91,7 @@ impl BatchEngine {
     pub fn stop_all(&self) {
         info!("stopping {} engines", self.entries.len());
         for entry in &self.entries {
-            let _ = entry.engine.shutdown_tx.send(true);
+            let _ = entry.shutdown_tx.send(true);
         }
     }
 
@@ -117,7 +116,7 @@ impl BatchEngine {
     /// Triggers a force-announce on all engines.
     pub async fn force_announce_all(&self) {
         for entry in &self.entries {
-            let _ = entry.engine.force_announce_tx.send(()).await;
+            let _ = entry.force_announce_tx.send(()).await;
         }
     }
 }
@@ -126,28 +125,6 @@ impl Default for BatchEngine {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Creates a minimal placeholder engine (used when the real engine is moved into a task).
-fn create_placeholder_engine() -> Engine {
-    use crate::client::profiles;
-
-    let torrent = TorrentMetainfo {
-        announce: String::new(),
-        announce_list: None,
-        name: String::new(),
-        piece_length: 0,
-        pieces: Vec::new(),
-        length: Some(0),
-        files: None,
-        comment: None,
-        created_by: None,
-        creation_date: None,
-        info_hash: [0; 20],
-    };
-
-    let profile = profiles::all_profiles()[0].clone();
-    Engine::new(torrent, profile, ProxyConfig::None, EngineConfig::default())
 }
 
 #[cfg(test)]

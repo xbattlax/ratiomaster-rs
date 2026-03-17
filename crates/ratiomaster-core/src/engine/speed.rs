@@ -46,9 +46,9 @@ pub struct SpeedState {
 
 /// Selects random base speeds within the configured range (Level 1).
 pub fn init_speed(config: &SpeedConfig) -> SpeedState {
-    let mut rng = rand::thread_rng();
-    let base_upload = rng.gen_range(config.upload_min..=config.upload_max);
-    let base_download = rng.gen_range(config.download_min..=config.download_max);
+    let mut rng = rand::rng();
+    let base_upload = rng.random_range(config.upload_min..=config.upload_max);
+    let base_download = rng.random_range(config.download_min..=config.download_max);
 
     SpeedState {
         base_upload,
@@ -62,12 +62,13 @@ pub fn init_speed(config: &SpeedConfig) -> SpeedState {
 ///
 /// The effective speed is clamped to a minimum of 0.
 pub fn vary_speed(state: &mut SpeedState, config: &SpeedConfig) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     if config.variation > 0 {
-        let upload_delta = rng.gen_range(0..=config.variation * 2) as i64 - config.variation as i64;
+        let upload_delta =
+            rng.random_range(0..=config.variation * 2) as i64 - config.variation as i64;
         let download_delta =
-            rng.gen_range(0..=config.variation * 2) as i64 - config.variation as i64;
+            rng.random_range(0..=config.variation * 2) as i64 - config.variation as i64;
 
         state.current_upload = (state.base_upload as i64 + upload_delta).max(0) as u64;
         state.current_download = (state.base_download as i64 + download_delta).max(0) as u64;

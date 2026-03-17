@@ -6,6 +6,7 @@ use std::time::Duration;
 
 /// Condition under which the engine should stop.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum StopCondition {
     /// Never stop automatically.
     Never,

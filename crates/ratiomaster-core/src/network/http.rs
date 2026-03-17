@@ -4,6 +4,7 @@
 /// HTTP/1.0 support, and proxy integration. Sends raw HTTP GET requests,
 /// reads responses with timeout, and handles gzip + chunked encoding.
 use std::io;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use flate2::read::GzDecoder;
@@ -11,8 +12,25 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::proxy::{self, ProxyConfig};
 
+/// Cached TLS client configuration (created once, reused for all HTTPS requests).
+fn tls_client_config() -> &'static Arc<rustls::ClientConfig> {
+    static TLS_CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    TLS_CONFIG.get_or_init(|| {
+        let provider = rustls::crypto::ring::default_provider();
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let config = rustls::ClientConfig::builder_with_provider(Arc::new(provider))
+            .with_safe_default_protocol_versions()
+            .expect("TLS protocol version configuration should not fail")
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        Arc::new(config)
+    })
+}
+
 /// Errors that can occur during HTTP operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HttpError {
     /// Failed to connect (directly or through proxy).
     #[error("connection error: {0}")]
@@ -100,15 +118,7 @@ pub async fn get(
     let request = build_get_request(&parsed, headers, version);
 
     if parsed.tls {
-        let provider = rustls::crypto::ring::default_provider();
-        let mut root_store = rustls::RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
-            .with_safe_default_protocol_versions()
-            .map_err(|e| HttpError::InvalidResponse(format!("TLS config error: {e}")))?
-            .with_root_certificates(root_store)
-            .with_no_client_auth();
-        let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(config));
+        let connector = tokio_rustls::TlsConnector::from(tls_client_config().clone());
         let server_name = rustls::pki_types::ServerName::try_from(parsed.host.clone())
             .map_err(|e| HttpError::InvalidResponse(format!("invalid TLS server name: {e}")))?;
         let mut tls_stream = connector
@@ -194,6 +204,9 @@ fn build_get_request(
     request
 }
 
+/// Maximum response size (10 MB) to prevent DoS from unbounded reads.
+const MAX_RESPONSE_SIZE: usize = 10 * 1024 * 1024;
+
 async fn read_response_data<S: tokio::io::AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
@@ -205,7 +218,15 @@ async fn read_response_data<S: tokio::io::AsyncRead + Unpin>(
         loop {
             match stream.read(&mut buf).await {
                 Ok(0) => break,
-                Ok(n) => data.extend_from_slice(&buf[..n]),
+                Ok(n) => {
+                    if data.len() + n > MAX_RESPONSE_SIZE {
+                        return Err(HttpError::InvalidResponse(format!(
+                            "response exceeds maximum size of {} bytes",
+                            MAX_RESPONSE_SIZE
+                        )));
+                    }
+                    data.extend_from_slice(&buf[..n]);
+                }
                 Err(e) => return Err(HttpError::Io(e)),
             }
         }

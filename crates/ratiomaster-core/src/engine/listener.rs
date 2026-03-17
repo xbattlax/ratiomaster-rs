@@ -4,11 +4,15 @@
 /// that contain a matching info_hash. This makes the client appear as a real
 /// peer to other clients in the swarm.
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::watch;
+use tokio::sync::{watch, Semaphore};
 use tracing::{debug, warn};
+
+/// Maximum number of concurrent handshake connections.
+const MAX_CONCURRENT_CONNECTIONS: usize = 10;
 
 /// The BitTorrent protocol handshake header.
 const PROTOCOL_STRING: &[u8] = b"BitTorrent protocol";
@@ -20,13 +24,15 @@ const HANDSHAKE_LEN: usize = 68;
 /// Runs as a background task until the shutdown signal is received.
 /// Returns the local address the listener is bound to.
 pub async fn start_listener(
+    bind_address: &str,
     port: u16,
     info_hash: [u8; 20],
     peer_id: [u8; 20],
     mut shutdown: watch::Receiver<bool>,
 ) -> std::io::Result<SocketAddr> {
-    let listener = TcpListener::bind(("0.0.0.0", port)).await?;
+    let listener = TcpListener::bind((bind_address, port)).await?;
     let local_addr = listener.local_addr()?;
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
 
     tokio::spawn(async move {
         loop {
@@ -36,11 +42,20 @@ pub async fn start_listener(
                         Ok((mut stream, addr)) => {
                             let ih = info_hash;
                             let pid = peer_id;
-                            tokio::spawn(async move {
-                                if let Err(e) = handle_connection(&mut stream, addr, &ih, &pid).await {
-                                    debug!("handshake error from {addr}: {e}");
+                            let permit = semaphore.clone().try_acquire_owned();
+                            match permit {
+                                Ok(permit) => {
+                                    tokio::spawn(async move {
+                                        if let Err(e) = handle_connection(&mut stream, addr, &ih, &pid).await {
+                                            debug!("handshake error from {addr}: {e}");
+                                        }
+                                        drop(permit);
+                                    });
                                 }
-                            });
+                                Err(_) => {
+                                    debug!("rejecting connection from {addr}: too many concurrent connections");
+                                }
+                            }
                         }
                         Err(e) => {
                             warn!("listener accept error: {e}");

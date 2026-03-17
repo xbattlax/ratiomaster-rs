@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 
 /// Errors that can occur during TCP operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TcpError {
     /// Connection attempt timed out.
     #[error("connection timed out after {0:?}")]

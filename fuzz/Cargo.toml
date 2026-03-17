@@ -1,0 +1,26 @@
+[package]
+name = "ratiomaster-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ratiomaster-core = { path = "../crates/ratiomaster-core" }
+
+# Separate workspace so cargo-fuzz works independently
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "bencode_decode"
+path = "fuzz_targets/bencode_decode.rs"
+doc = false
+
+[[bin]]
+name = "torrent_parse"
+path = "fuzz_targets/torrent_parse.rs"
+doc = false

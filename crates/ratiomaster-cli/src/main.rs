@@ -148,6 +148,18 @@ enum Commands {
         #[arg(long)]
         config: Option<PathBuf>,
     },
+
+    /// Store proxy credentials in the system keyring.
+    #[cfg(feature = "keyring")]
+    StoreCredential {
+        /// Proxy username.
+        #[arg(long)]
+        username: String,
+
+        /// Proxy password.
+        #[arg(long)]
+        password: String,
+    },
 }
 
 #[tokio::main]
@@ -164,9 +176,23 @@ async fn main() {
     setup_logging(&cli);
 
     // Handle subcommands
-    if let Some(Commands::Batch { paths, config }) = cli.command {
-        run_batch(paths, config).await;
-        return;
+    match cli.command {
+        Some(Commands::Batch { paths, config }) => {
+            run_batch(paths, config).await;
+            return;
+        }
+        #[cfg(feature = "keyring")]
+        Some(Commands::StoreCredential { username, password }) => {
+            match ratiomaster_core::config::credential_store::store_password(&username, &password) {
+                Ok(()) => println!("Credential stored for '{username}'"),
+                Err(e) => {
+                    eprintln!("error: failed to store credential: {e}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        None => {}
     }
 
     // Single torrent mode requires a torrent file
@@ -505,6 +531,7 @@ fn build_engine_config(cli: &Cli, base: &AppConfig) -> EngineConfig {
         max_retries: 5,
         initial_downloaded_percent,
         http_timeout: Duration::from_secs(30),
+        bind_address: "127.0.0.1".into(),
     }
 }
 

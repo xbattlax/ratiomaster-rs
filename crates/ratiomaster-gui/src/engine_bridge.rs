@@ -48,6 +48,7 @@ pub fn start_engine(tab: &mut TorrentTab, runtime: &tokio::runtime::Runtime) -> 
         max_retries: 5,
         initial_downloaded_percent: 0,
         http_timeout: std::time::Duration::from_secs(30),
+        bind_address: "127.0.0.1".into(),
     };
 
     let mut engine = Engine::new(torrent_meta, profile, proxy, engine_config);

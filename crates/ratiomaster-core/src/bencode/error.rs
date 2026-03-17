@@ -24,4 +24,8 @@ pub enum BencodeError {
     /// Dictionary keys were not in sorted order.
     #[error("dictionary keys are not in sorted order")]
     UnsortedKeys,
+
+    /// Nesting depth exceeds the maximum allowed limit.
+    #[error("nesting depth exceeds maximum of 128")]
+    NestingTooDeep,
 }

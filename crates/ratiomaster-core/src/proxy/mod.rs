@@ -13,6 +13,7 @@ use crate::network::tcp;
 
 /// Errors that can occur during proxy operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ProxyError {
     /// The proxy rejected the connection request.
     #[error("proxy request rejected: {0}")]
@@ -36,7 +37,8 @@ pub enum ProxyError {
 }
 
 /// Proxy configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[non_exhaustive]
 pub enum ProxyConfig {
     /// Direct connection, no proxy.
     None,
@@ -68,6 +70,64 @@ pub enum ProxyConfig {
         proxy_port: u16,
         credentials: Option<http::Credentials>,
     },
+}
+
+impl std::fmt::Debug for ProxyConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProxyConfig::None => write!(f, "ProxyConfig::None"),
+            ProxyConfig::Socks4 {
+                proxy_host,
+                proxy_port,
+                user_id,
+            } => f
+                .debug_struct("ProxyConfig::Socks4")
+                .field("proxy_host", proxy_host)
+                .field("proxy_port", proxy_port)
+                .field("user_id", user_id)
+                .finish(),
+            ProxyConfig::Socks4a {
+                proxy_host,
+                proxy_port,
+                user_id,
+            } => f
+                .debug_struct("ProxyConfig::Socks4a")
+                .field("proxy_host", proxy_host)
+                .field("proxy_port", proxy_port)
+                .field("user_id", user_id)
+                .finish(),
+            ProxyConfig::Socks5 {
+                proxy_host,
+                proxy_port,
+                credentials,
+            } => {
+                let mut s = f.debug_struct("ProxyConfig::Socks5");
+                s.field("proxy_host", proxy_host)
+                    .field("proxy_port", proxy_port);
+                if credentials.is_some() {
+                    s.field("credentials", &"<redacted>");
+                } else {
+                    s.field("credentials", &None::<()>);
+                }
+                s.finish()
+            }
+            ProxyConfig::HttpConnect {
+                proxy_host,
+                proxy_port,
+                credentials,
+            } => {
+                let mut s = f.debug_struct("ProxyConfig::HttpConnect");
+                s.field("proxy_host", proxy_host)
+                    .field("proxy_port", proxy_port);
+                if credentials.is_some() {
+                    s.field("credentials", &"<redacted>");
+                } else {
+                    s.field("credentials", &None::<()>);
+                }
+                s.finish()
+            }
+        }
+    }
 }
 
 /// Connects to a target through the configured proxy (or directly if `ProxyConfig::None`).

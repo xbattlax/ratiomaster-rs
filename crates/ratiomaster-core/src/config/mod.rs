@@ -2,6 +2,8 @@
 ///
 /// Provides platform-aware config directory detection, default config generation,
 /// and serialization to/from TOML files.
+#[cfg(feature = "keyring")]
+pub mod credential_store;
 pub mod custom_profiles;
 pub mod session;
 pub mod version;
@@ -300,6 +302,21 @@ pub fn save_config(config: &AppConfig) -> Result<(), ConfigError> {
 
 /// Converts the TOML proxy config to a `ProxyConfig`.
 impl ProxyToml {
+    /// Resolves the proxy password, falling back to the system keyring when
+    /// the `keyring` feature is enabled and the TOML password field is empty.
+    fn resolve_password(&self) -> String {
+        if !self.password.is_empty() {
+            return self.password.clone();
+        }
+        #[cfg(feature = "keyring")]
+        if !self.username.is_empty() {
+            if let Some(pw) = credential_store::load_password(&self.username) {
+                return pw;
+            }
+        }
+        String::new()
+    }
+
     pub fn to_proxy_config(&self) -> ProxyConfig {
         match self.proxy_type.as_str() {
             "socks4" => ProxyConfig::Socks4 {
@@ -320,7 +337,7 @@ impl ProxyToml {
                 } else {
                     Some(crate::proxy::socks5::Credentials {
                         username: self.username.clone(),
-                        password: self.password.clone(),
+                        password: self.resolve_password(),
                     })
                 },
             },
@@ -332,7 +349,7 @@ impl ProxyToml {
                 } else {
                     Some(crate::proxy::http::Credentials {
                         username: self.username.clone(),
-                        password: self.password.clone(),
+                        password: self.resolve_password(),
                     })
                 },
             },
@@ -389,12 +406,14 @@ impl AppConfig {
             max_retries: 5,
             initial_downloaded_percent: 0,
             http_timeout: std::time::Duration::from_secs(30),
+            bind_address: "127.0.0.1".into(),
         }
     }
 }
 
 /// Errors from configuration operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("io error: {0}")]
     Io(#[source] std::io::Error),

@@ -8,6 +8,7 @@ use crate::bencode::{self, BValue};
 
 /// Errors that can occur when parsing tracker responses.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TrackerResponseError {
     /// The tracker returned a failure reason.
     #[error("tracker failure: {0}")]

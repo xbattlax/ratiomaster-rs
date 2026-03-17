@@ -409,6 +409,7 @@ impl App {
             max_retries: 5,
             initial_downloaded_percent: 0,
             http_timeout: std::time::Duration::from_secs(30),
+            bind_address: "127.0.0.1".into(),
         };
 
         let proxy = build_proxy_config(tab);

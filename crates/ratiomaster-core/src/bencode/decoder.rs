@@ -3,15 +3,23 @@ use std::collections::BTreeMap;
 use super::error::BencodeError;
 use super::value::BValue;
 
+/// Maximum nesting depth for lists and dicts to prevent stack overflow.
+const MAX_DEPTH: usize = 128;
+
 /// Internal decoder state tracking the current position in the input.
 struct Decoder<'a> {
     data: &'a [u8],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Decoder<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
+        Self {
+            data,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn peek(&self) -> Result<u8, BencodeError> {
@@ -113,7 +121,7 @@ impl<'a> Decoder<'a> {
         self.advance();
 
         // Read `len` bytes
-        if self.pos + len > self.data.len() {
+        if len > self.data.len().saturating_sub(self.pos) {
             return Err(BencodeError::UnexpectedEof);
         }
 
@@ -124,6 +132,10 @@ impl<'a> Decoder<'a> {
     }
 
     fn decode_list(&mut self) -> Result<BValue, BencodeError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(BencodeError::NestingTooDeep);
+        }
+        self.depth += 1;
         self.expect(b'l')?;
         let mut items = Vec::new();
 
@@ -132,10 +144,15 @@ impl<'a> Decoder<'a> {
         }
 
         self.expect(b'e')?;
+        self.depth -= 1;
         Ok(BValue::List(items))
     }
 
     fn decode_dict(&mut self) -> Result<BValue, BencodeError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(BencodeError::NestingTooDeep);
+        }
+        self.depth += 1;
         self.expect(b'd')?;
         let mut map = BTreeMap::new();
         let mut last_key: Option<Vec<u8>> = None;
@@ -160,6 +177,7 @@ impl<'a> Decoder<'a> {
         }
 
         self.expect(b'e')?;
+        self.depth -= 1;
         Ok(BValue::Dict(map))
     }
 }

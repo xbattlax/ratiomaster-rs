@@ -9,10 +9,19 @@ use tokio::net::TcpStream;
 use super::ProxyError;
 
 /// HTTP CONNECT authentication credentials.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("username", &self.username)
+            .field("password", &"***")
+            .finish()
+    }
 }
 
 /// Performs HTTP CONNECT handshake on an already-connected stream.
@@ -111,36 +120,10 @@ pub fn parse_status_line(line: &str) -> Result<u16, ProxyError> {
         .map_err(|_| ProxyError::ProtocolError(format!("invalid HTTP status code: {:?}", parts[1])))
 }
 
-/// Simple Base64 encoder (no external dependency needed for this).
+/// Base64-encodes a string using the standard alphabet with padding.
 fn base64_encode(input: &str) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let bytes = input.as_bytes();
-    let mut result = String::with_capacity(bytes.len().div_ceil(3) * 4);
-
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-
-        result.push(CHARS[(triple >> 18) as usize & 0x3F] as char);
-        result.push(CHARS[(triple >> 12) as usize & 0x3F] as char);
-
-        if chunk.len() > 1 {
-            result.push(CHARS[(triple >> 6) as usize & 0x3F] as char);
-        } else {
-            result.push('=');
-        }
-
-        if chunk.len() > 2 {
-            result.push(CHARS[triple as usize & 0x3F] as char);
-        } else {
-            result.push('=');
-        }
-    }
-
-    result
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(input.as_bytes())
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
 /// Top-level error type for the ratiomaster-core crate.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     /// An error occurred during BEncode decoding or encoding.
     #[error("bencode error: {0}")]

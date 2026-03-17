@@ -1,3 +1,6 @@
+const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
+const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
+
 /// URL-encodes a byte slice using percent-encoding.
 ///
 /// Bytes that are unreserved (alphanumeric plus `-`, `_`, `.`, `~`) pass through
@@ -19,15 +22,16 @@
 /// assert_eq!(url_encode(&hash, false), "%12%ab4");
 /// ```
 pub fn url_encode(bytes: &[u8], uppercase: bool) -> String {
+    let hex = if uppercase { HEX_UPPER } else { HEX_LOWER };
     let mut result = String::with_capacity(bytes.len() * 3);
 
     for &byte in bytes {
         if is_unreserved(byte) {
             result.push(byte as char);
-        } else if uppercase {
-            result.push_str(&format!("%{:02X}", byte));
         } else {
-            result.push_str(&format!("%{:02x}", byte));
+            result.push('%');
+            result.push(hex[(byte >> 4) as usize] as char);
+            result.push(hex[(byte & 0x0F) as usize] as char);
         }
     }
 

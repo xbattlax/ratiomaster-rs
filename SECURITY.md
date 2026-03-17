@@ -25,6 +25,15 @@ All release binaries are built in GitHub Actions CI with checksums (SHA-256) pro
 shasum -a 256 -c ratiomaster-*.sha256
 ```
 
+## v0.2.0 Security Improvements
+
+- Credentials are masked in `Debug` output for `ProxyConfig`, `socks5::Credentials`, and `http::Credentials`
+- TCP handshake listener binds to `127.0.0.1` by default instead of `0.0.0.0`
+- HTTP response reads are capped at 10 MB to prevent memory exhaustion
+- Rate limiting on the TCP handshake listener (max 10 concurrent connections)
+- All public error and config enums are marked `#[non_exhaustive]`
+- Hand-rolled Base64 encoder replaced with the audited `base64` crate
+
 ## Dependencies
 
 This project uses only well-known Rust crates. Run `cargo audit` to check for known vulnerabilities in dependencies.

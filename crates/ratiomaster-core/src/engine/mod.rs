@@ -16,9 +16,10 @@ use tracing::{debug, error, info, warn};
 
 use crate::client::generator;
 use crate::client::ClientProfile;
-use crate::network::http::{self, HttpVersion};
+use crate::network::http::HttpVersion;
 use crate::proxy::ProxyConfig;
 use crate::torrent::TorrentMetainfo;
+use crate::tracker::client::{HttpTrackerClient, TrackerClient};
 use crate::tracker::{announce, response};
 
 use speed::{SpeedConfig, SpeedState};
@@ -41,6 +42,8 @@ pub struct EngineConfig {
     pub initial_downloaded_percent: u8,
     /// HTTP request timeout.
     pub http_timeout: Duration,
+    /// Bind address for the TCP handshake listener.
+    pub bind_address: String,
 }
 
 impl Default for EngineConfig {
@@ -53,6 +56,7 @@ impl Default for EngineConfig {
             max_retries: 5,
             initial_downloaded_percent: 0,
             http_timeout: Duration::from_secs(30),
+            bind_address: "127.0.0.1".into(),
         }
     }
 }
@@ -97,7 +101,6 @@ pub struct AnnounceResult {
 pub struct Engine {
     torrent: TorrentMetainfo,
     profile: ClientProfile,
-    proxy: ProxyConfig,
     config: EngineConfig,
     state: EngineState,
     peer_id: [u8; 20],
@@ -108,6 +111,8 @@ pub struct Engine {
     pub shutdown_tx: watch::Sender<bool>,
     shutdown_rx: watch::Receiver<bool>,
     state_watch_tx: watch::Sender<EngineState>,
+    local_ip: String,
+    tracker_client: Box<dyn TrackerClient>,
 }
 
 impl Engine {
@@ -117,6 +122,17 @@ impl Engine {
         profile: ClientProfile,
         proxy: ProxyConfig,
         config: EngineConfig,
+    ) -> Self {
+        let tracker_client = Box::new(HttpTrackerClient::new(proxy, config.http_timeout));
+        Self::new_with_client(torrent, profile, config, tracker_client)
+    }
+
+    /// Creates a new engine with a custom tracker client (for testing or custom transports).
+    pub fn new_with_client(
+        torrent: TorrentMetainfo,
+        profile: ClientProfile,
+        config: EngineConfig,
+        tracker_client: Box<dyn TrackerClient>,
     ) -> Self {
         let total_size = torrent.total_size();
         let initial_downloaded = total_size * config.initial_downloaded_percent as u64 / 100;
@@ -143,10 +159,11 @@ impl Engine {
 
         let (state_watch_tx, _) = watch::channel(initial_state.clone());
 
+        let local_ip = crate::network::local_ip::detect_local_ip().to_string();
+
         Self {
             torrent,
             profile,
-            proxy,
             config,
             state: initial_state,
             peer_id,
@@ -157,6 +174,8 @@ impl Engine {
             shutdown_tx,
             shutdown_rx,
             state_watch_tx,
+            local_ip,
+            tracker_client,
         }
     }
 
@@ -232,6 +251,7 @@ impl Engine {
 
         // Start the handshake listener
         let listener_addr = listener::start_listener(
+            &self.config.bind_address,
             self.config.port,
             self.torrent.info_hash,
             self.peer_id,
@@ -380,7 +400,7 @@ impl Engine {
     }
 
     async fn do_announce(&mut self, event: &str) -> Result<AnnounceResult, EngineError> {
-        let local_ip = crate::network::local_ip::detect_local_ip().to_string();
+        let local_ip = self.local_ip.clone();
 
         let event_param = if event.is_empty() {
             String::new()
@@ -422,15 +442,11 @@ impl Engine {
 
         debug!("announce URL: {url}");
 
-        let resp = http::get(
-            &url,
-            &headers,
-            http_version,
-            &self.proxy,
-            self.config.http_timeout,
-        )
-        .await
-        .map_err(EngineError::Http)?;
+        let resp = self
+            .tracker_client
+            .announce(&url, &headers, http_version)
+            .await
+            .map_err(EngineError::Http)?;
 
         let tracker_resp = response::parse(&resp.body).map_err(|e| match e {
             response::TrackerResponseError::TrackerFailure(reason) => {
@@ -470,6 +486,7 @@ impl Engine {
 
 /// Errors from the announce engine.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum EngineError {
     /// HTTP communication error.
     #[error("http error: {0}")]

@@ -41,7 +41,7 @@ jobs:
             use_cross: false
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -226,7 +226,7 @@ jobs:
         run: Get-FileHash "ratiomaster-${{ matrix.target }}.zip" -Algorithm SHA256 | Format-List | Out-File "ratiomaster-${{ matrix.target }}.zip.sha256"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-${{ matrix.target }}
           path: |
@@ -238,7 +238,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           merge-multiple: true
 

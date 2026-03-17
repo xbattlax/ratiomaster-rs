@@ -24,7 +24,7 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,3 +44,82 @@ jobs:
 
       - name: Format check
         run: cargo fmt --all -- --check
+
+  msrv:
+    name: MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit
+
+  fuzz:
+    name: Fuzz testing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Fuzz bencode_decode
+        run: cd fuzz && cargo +nightly fuzz run bencode_decode -- -max_total_time=60
+
+      - name: Fuzz torrent_parse
+        run: cd fuzz && cargo +nightly fuzz run torrent_parse -- -max_total_time=60
+
+  bench:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: |
+          cargo bench -p ratiomaster-core --bench bencode_bench
+          cargo bench -p ratiomaster-core --bench url_encode_bench
+          cargo bench -p ratiomaster-core --bench speed_bench
+          cargo bench -p ratiomaster-core --bench generator_bench
+          cargo bench -p ratiomaster-core --bench torrent_bench
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v6
+        with:
+          name: criterion-report
+          path: target/criterion/

@@ -12,7 +12,7 @@ use super::{ClientProfile, KeyFormat, RandomType};
 /// generated according to the profile's `peer_id_random_type`. The total is
 /// always exactly 20 bytes.
 pub fn generate_peer_id(profile: &ClientProfile) -> [u8; 20] {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut peer_id = [0u8; 20];
 
     let prefix = &profile.peer_id_prefix;
@@ -28,11 +28,11 @@ pub fn generate_peer_id(profile: &ClientProfile) -> [u8; 20] {
 
 /// Generates a session key string based on the client profile.
 pub fn generate_key(profile: &ClientProfile) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     match profile.key_format {
         KeyFormat::Numeric(len) => (0..len)
-            .map(|_| (b'0' + rng.gen_range(0..10)) as char)
+            .map(|_| (b'0' + rng.random_range(0..10)) as char)
             .collect(),
         KeyFormat::Alphanumeric(len) => {
             let chars: Vec<char> = if profile.key_uppercase {
@@ -43,7 +43,7 @@ pub fn generate_key(profile: &ClientProfile) -> String {
                     .collect()
             };
             (0..len)
-                .map(|_| chars[rng.gen_range(0..chars.len())])
+                .map(|_| chars[rng.random_range(0..chars.len())])
                 .collect()
         }
         KeyFormat::Hex(len) => {
@@ -53,7 +53,7 @@ pub fn generate_key(profile: &ClientProfile) -> String {
                 b"0123456789abcdef"
             };
             (0..len)
-                .map(|_| hex_chars[rng.gen_range(0..16)] as char)
+                .map(|_| hex_chars[rng.random_range(0..16)] as char)
                 .collect()
         }
     }
@@ -65,14 +65,14 @@ fn generate_random_bytes(rng: &mut impl Rng, len: usize, random_type: RandomType
         RandomType::Alphanumeric => {
             let chars = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
             (0..len)
-                .map(|_| chars[rng.gen_range(0..chars.len())])
+                .map(|_| chars[rng.random_range(0..chars.len())])
                 .collect()
         }
-        RandomType::Numeric => (0..len).map(|_| b'0' + rng.gen_range(0..10)).collect(),
-        RandomType::Random => (0..len).map(|_| rng.gen::<u8>()).collect(),
+        RandomType::Numeric => (0..len).map(|_| b'0' + rng.random_range(0..10)).collect(),
+        RandomType::Random => (0..len).map(|_| rng.random::<u8>()).collect(),
         RandomType::Hex => {
             let hex = b"0123456789ABCDEF";
-            (0..len).map(|_| hex[rng.gen_range(0..16)]).collect()
+            (0..len).map(|_| hex[rng.random_range(0..16)]).collect()
         }
     }
 }

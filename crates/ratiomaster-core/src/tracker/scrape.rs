@@ -6,6 +6,7 @@ use crate::bencode;
 
 /// Errors that can occur during scrape operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ScrapeError {
     /// The announce URL cannot be converted to a scrape URL.
     #[error("cannot derive scrape URL from: {0}")]
