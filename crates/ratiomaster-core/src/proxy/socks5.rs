@@ -10,11 +10,14 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::ProxyError;
 
 /// SOCKS5 authentication credentials.
-#[derive(Clone)]
+///
+/// Password is zeroized on drop.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -60,7 +63,7 @@ pub async fn handshake(
                 "server requires auth but no credentials provided".into(),
             )
         })?;
-        let auth_req = build_auth_request(creds);
+        let auth_req = build_auth_request(creds)?;
         stream.write_all(&auth_req).await?;
         stream.flush().await?;
 
@@ -70,7 +73,7 @@ pub async fn handshake(
     }
 
     // Phase 3: Connect
-    let connect_req = build_connect_request(target, target_port);
+    let connect_req = build_connect_request(target, target_port)?;
     stream.write_all(&connect_req).await?;
     stream.flush().await?;
 
@@ -119,16 +122,26 @@ pub fn parse_greeting_response(response: &[u8; 2], auth_offered: bool) -> Result
 /// ```text
 /// VER(0x01) | ULEN(1) | UNAME(1-255) | PLEN(1) | PASSWD(1-255)
 /// ```
-pub fn build_auth_request(credentials: &Credentials) -> Vec<u8> {
-    let ulen = credentials.username.len().min(255);
-    let plen = credentials.password.len().min(255);
+pub fn build_auth_request(credentials: &Credentials) -> Result<Vec<u8>, ProxyError> {
+    let ulen = credentials.username.len();
+    let plen = credentials.password.len();
+    if ulen > 255 {
+        return Err(ProxyError::ProtocolError(format!(
+            "SOCKS5 username exceeds 255 bytes ({ulen} bytes)"
+        )));
+    }
+    if plen > 255 {
+        return Err(ProxyError::ProtocolError(format!(
+            "SOCKS5 password exceeds 255 bytes ({plen} bytes)"
+        )));
+    }
     let mut buf = Vec::with_capacity(3 + ulen + plen);
     buf.push(0x01); // Auth sub-negotiation version
     buf.push(ulen as u8);
-    buf.extend_from_slice(&credentials.username.as_bytes()[..ulen]);
+    buf.extend_from_slice(credentials.username.as_bytes());
     buf.push(plen as u8);
-    buf.extend_from_slice(&credentials.password.as_bytes()[..plen]);
-    buf
+    buf.extend_from_slice(credentials.password.as_bytes());
+    Ok(buf)
 }
 
 /// Parses the authentication response.
@@ -146,7 +159,7 @@ pub fn parse_auth_response(response: &[u8; 2]) -> Result<(), ProxyError> {
 /// ```text
 /// VER(0x05) | CMD(0x01) | RSV(0x00) | ATYP | DST.ADDR | DST.PORT
 /// ```
-pub fn build_connect_request(target: &Address, port: u16) -> Vec<u8> {
+pub fn build_connect_request(target: &Address, port: u16) -> Result<Vec<u8>, ProxyError> {
     let mut buf = Vec::new();
     buf.push(0x05); // VER
     buf.push(0x01); // CMD = CONNECT
@@ -158,10 +171,15 @@ pub fn build_connect_request(target: &Address, port: u16) -> Vec<u8> {
             buf.extend_from_slice(&ip.octets());
         }
         Address::Domain(host) => {
+            let len = host.len();
+            if len > 255 {
+                return Err(ProxyError::ProtocolError(format!(
+                    "SOCKS5 domain exceeds 255 bytes ({len} bytes)"
+                )));
+            }
             buf.push(0x03); // ATYP = Domain
-            let len = host.len().min(255);
             buf.push(len as u8);
-            buf.extend_from_slice(&host.as_bytes()[..len]);
+            buf.extend_from_slice(host.as_bytes());
         }
         Address::Ipv6(ip) => {
             buf.push(0x04); // ATYP = IPv6
@@ -170,7 +188,7 @@ pub fn build_connect_request(target: &Address, port: u16) -> Vec<u8> {
     }
 
     buf.extend_from_slice(&port.to_be_bytes());
-    buf
+    Ok(buf)
 }
 
 /// Reads and parses the SOCKS5 connect response.
@@ -287,12 +305,30 @@ mod tests {
             username: "user".into(),
             password: "pass".into(),
         };
-        let req = build_auth_request(&creds);
+        let req = build_auth_request(&creds).unwrap();
         assert_eq!(req[0], 0x01); // VER
         assert_eq!(req[1], 4); // ULEN
         assert_eq!(&req[2..6], b"user");
         assert_eq!(req[6], 4); // PLEN
         assert_eq!(&req[7..11], b"pass");
+    }
+
+    #[test]
+    fn auth_request_rejects_long_username() {
+        let creds = Credentials {
+            username: "x".repeat(256),
+            password: "pass".into(),
+        };
+        assert!(build_auth_request(&creds).is_err());
+    }
+
+    #[test]
+    fn auth_request_rejects_long_password() {
+        let creds = Credentials {
+            username: "user".into(),
+            password: "x".repeat(256),
+        };
+        assert!(build_auth_request(&creds).is_err());
     }
 
     #[test]
@@ -307,7 +343,7 @@ mod tests {
 
     #[test]
     fn connect_request_ipv4() {
-        let req = build_connect_request(&Address::Ipv4(Ipv4Addr::new(192, 168, 1, 1)), 80);
+        let req = build_connect_request(&Address::Ipv4(Ipv4Addr::new(192, 168, 1, 1)), 80).unwrap();
         assert_eq!(req[0], 0x05); // VER
         assert_eq!(req[1], 0x01); // CMD
         assert_eq!(req[2], 0x00); // RSV
@@ -318,7 +354,7 @@ mod tests {
 
     #[test]
     fn connect_request_domain() {
-        let req = build_connect_request(&Address::Domain("example.com".into()), 443);
+        let req = build_connect_request(&Address::Domain("example.com".into()), 443).unwrap();
         assert_eq!(req[0], 0x05);
         assert_eq!(req[3], 0x03); // ATYP = Domain
         assert_eq!(req[4], 11); // Domain length
@@ -327,9 +363,15 @@ mod tests {
     }
 
     #[test]
+    fn connect_request_rejects_long_domain() {
+        let long_domain = "x".repeat(256);
+        assert!(build_connect_request(&Address::Domain(long_domain), 443).is_err());
+    }
+
+    #[test]
     fn connect_request_ipv6() {
         let ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
-        let req = build_connect_request(&Address::Ipv6(ip), 8080);
+        let req = build_connect_request(&Address::Ipv6(ip), 8080).unwrap();
         assert_eq!(req[3], 0x04); // ATYP = IPv6
         assert_eq!(&req[4..20], &ip.octets());
         assert_eq!(&req[20..22], &8080u16.to_be_bytes());

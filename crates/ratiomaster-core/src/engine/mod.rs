@@ -3,11 +3,13 @@
 /// Manages the lifecycle of tracker announces: start -> periodic announce -> stop.
 /// Handles speed simulation, stop conditions, failure retry, seed mode,
 /// and manual announce triggers.
+pub(crate) mod listener;
+pub(crate) mod system_info;
+
+// Submodules with public re-exports
 pub mod batch;
-pub mod listener;
 pub mod speed;
 pub mod stop;
-pub mod system_info;
 
 use std::time::{Duration, Instant};
 
@@ -82,6 +84,20 @@ pub struct EngineState {
     pub interval: u64,
     /// Session start time.
     pub started_at: Instant,
+}
+
+impl EngineState {
+    /// Returns true if the observable fields differ from another state.
+    fn has_changed_from(&self, other: &Self) -> bool {
+        self.uploaded != other.uploaded
+            || self.downloaded != other.downloaded
+            || self.left != other.left
+            || self.announce_count != other.announce_count
+            || self.completed_sent != other.completed_sent
+            || self.seeders != other.seeders
+            || self.leechers != other.leechers
+            || self.interval != other.interval
+    }
 }
 
 /// Result of a single announce.
@@ -221,6 +237,18 @@ impl Engine {
         self.state_watch_tx.subscribe()
     }
 
+    /// Broadcasts the current state to watchers, only if changed.
+    fn broadcast_state(&self) {
+        self.state_watch_tx.send_if_modified(|current| {
+            if self.state.has_changed_from(current) {
+                *current = self.state.clone();
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     /// Sends the "started" event to the tracker.
     pub async fn start(&mut self) -> Result<AnnounceResult, EngineError> {
         info!("sending started event to tracker");
@@ -265,7 +293,7 @@ impl Engine {
         let start_result = self.start().await?;
         self.state.interval = start_result.interval;
         self.state.announce_count += 1;
-        let _ = self.state_watch_tx.send(self.state.clone());
+        self.broadcast_state();
 
         if self.state.left == 0 && !self.state.completed_sent {
             info!("seed mode: sending completed event");
@@ -273,7 +301,7 @@ impl Engine {
             self.state.interval = completed_result.interval;
             self.state.announce_count += 1;
             self.state.completed_sent = true;
-            let _ = self.state_watch_tx.send(self.state.clone());
+            self.broadcast_state();
         }
 
         let mut secs_since_announce = 0u64;
@@ -314,8 +342,8 @@ impl Engine {
                 self.state.left = self.state.left.saturating_sub(actual_download);
             }
 
-            // Publish state every second for live GUI updates
-            let _ = self.state_watch_tx.send(self.state.clone());
+            // Publish state only when it has actually changed
+            self.broadcast_state();
 
             // Announce at interval or on force
             let should_announce = force_announce || secs_since_announce >= self.state.interval;
@@ -473,7 +501,7 @@ impl Engine {
         );
 
         // Publish state update
-        let _ = self.state_watch_tx.send(self.state.clone());
+        self.broadcast_state();
 
         Ok(AnnounceResult {
             interval: tracker_resp.interval,

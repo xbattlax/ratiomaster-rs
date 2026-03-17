@@ -23,7 +23,8 @@ pub fn log_system_info() {
 }
 
 /// Returns a system info summary string (for non-logging use).
-pub fn system_info_string() -> String {
+#[cfg(test)]
+fn system_info_string() -> String {
     let mut parts = Vec::new();
     parts.push(format!("OS: {}", std::env::consts::OS));
     parts.push(format!("arch: {}", std::env::consts::ARCH));

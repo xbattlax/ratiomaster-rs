@@ -49,17 +49,26 @@ pub fn build_announce_url(
     let uploaded = round_by_denominator(params.uploaded, 0x4000);
     let downloaded = round_by_denominator(params.downloaded, 0x10);
 
-    let query = query_template
-        .replace("{infohash}", &info_hash_encoded)
-        .replace("{peerid}", &peer_id_encoded)
-        .replace("{port}", &params.port.to_string())
-        .replace("{uploaded}", &uploaded.to_string())
-        .replace("{downloaded}", &downloaded.to_string())
-        .replace("{left}", &params.left.to_string())
-        .replace("{numwant}", &params.numwant.to_string())
-        .replace("{key}", &params.key)
-        .replace("{event}", &params.event)
-        .replace("{localip}", &params.local_ip);
+    let uploaded_str = uploaded.to_string();
+    let downloaded_str = downloaded.to_string();
+    let port_str = params.port.to_string();
+    let left_str = params.left.to_string();
+    let numwant_str = params.numwant.to_string();
+
+    let replacements: &[(&str, &str)] = &[
+        ("{infohash}", &info_hash_encoded),
+        ("{peerid}", &peer_id_encoded),
+        ("{port}", &port_str),
+        ("{uploaded}", &uploaded_str),
+        ("{downloaded}", &downloaded_str),
+        ("{left}", &left_str),
+        ("{numwant}", &numwant_str),
+        ("{key}", &params.key),
+        ("{event}", &params.event),
+        ("{localip}", &params.local_ip),
+    ];
+
+    let query = substitute_placeholders(query_template, replacements);
 
     let separator = if tracker_url.contains('?') { '&' } else { '?' };
     format!("{tracker_url}{separator}{query}")
@@ -77,6 +86,25 @@ pub fn build_headers(
     let info_hash_encoded = url_encode(&params.info_hash, uppercase_hash);
     let peer_id_encoded = url_encode(&params.peer_id, uppercase_hash);
 
+    let port_str = params.port.to_string();
+    let uploaded_str = params.uploaded.to_string();
+    let downloaded_str = params.downloaded.to_string();
+    let left_str = params.left.to_string();
+    let numwant_str = params.numwant.to_string();
+
+    let replacements: &[(&str, &str)] = &[
+        ("{infohash}", &info_hash_encoded),
+        ("{peerid}", &peer_id_encoded),
+        ("{port}", &port_str),
+        ("{uploaded}", &uploaded_str),
+        ("{downloaded}", &downloaded_str),
+        ("{left}", &left_str),
+        ("{numwant}", &numwant_str),
+        ("{key}", &params.key),
+        ("{event}", &params.event),
+        ("{localip}", &params.local_ip),
+    ];
+
     let mut headers = Vec::new();
 
     for line in headers_template.lines() {
@@ -85,17 +113,7 @@ pub fn build_headers(
             continue;
         }
 
-        let processed = line
-            .replace("{infohash}", &info_hash_encoded)
-            .replace("{peerid}", &peer_id_encoded)
-            .replace("{port}", &params.port.to_string())
-            .replace("{uploaded}", &params.uploaded.to_string())
-            .replace("{downloaded}", &params.downloaded.to_string())
-            .replace("{left}", &params.left.to_string())
-            .replace("{numwant}", &params.numwant.to_string())
-            .replace("{key}", &params.key)
-            .replace("{event}", &params.event)
-            .replace("{localip}", &params.local_ip);
+        let processed = substitute_placeholders(line, replacements);
 
         if let Some((key, value)) = processed.split_once(':') {
             headers.push((key.trim().to_string(), value.trim().to_string()));
@@ -103,6 +121,34 @@ pub fn build_headers(
     }
 
     headers
+}
+
+/// Single-pass placeholder substitution.
+///
+/// Scans the template once, copying literal text and replacing `{name}` placeholders
+/// as they are encountered.
+fn substitute_placeholders(template: &str, replacements: &[(&str, &str)]) -> String {
+    let mut result = String::with_capacity(template.len());
+    let bytes = template.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] == b'{' {
+            if let Some(close) = template[i..].find('}') {
+                let placeholder = &template[i..i + close + 1];
+                if let Some((_key, value)) = replacements.iter().find(|(k, _)| *k == placeholder) {
+                    result.push_str(value);
+                    i += close + 1;
+                    continue;
+                }
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+
+    result
 }
 
 /// Rounds a value down to the nearest multiple of the denominator.

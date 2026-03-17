@@ -3,13 +3,16 @@
 /// Sends `CONNECT host:port HTTP/1.1` to the proxy server.
 /// Handles 407 Proxy Authentication Required with Basic auth retry.
 /// A 2xx response indicates the tunnel is established.
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::ProxyError;
 
 /// HTTP CONNECT authentication credentials.
-#[derive(Clone)]
+///
+/// Password is zeroized on drop.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
@@ -39,7 +42,7 @@ pub async fn handshake(
     stream.write_all(request.as_bytes()).await?;
     stream.flush().await?;
 
-    let status = read_response_status(stream).await?;
+    let status = read_response(stream).await?;
 
     if (200..300).contains(&status) {
         return Ok(());
@@ -57,7 +60,7 @@ pub async fn handshake(
         stream.write_all(request.as_bytes()).await?;
         stream.flush().await?;
 
-        let status = read_response_status(stream).await?;
+        let status = read_response(stream).await?;
         if (200..300).contains(&status) {
             return Ok(());
         }
@@ -85,22 +88,45 @@ pub fn build_connect_request(host: &str, port: u16, credentials: Option<&Credent
     request
 }
 
-/// Reads the HTTP response status line and consumes headers.
+/// Reads the HTTP response status line, consumes headers and any response body.
 ///
-/// Returns the status code. Reads until the empty line marking end of headers.
-async fn read_response_status(stream: &mut TcpStream) -> Result<u16, ProxyError> {
+/// Returns the status code. Reads until the empty line marking end of headers,
+/// then consumes any body indicated by Content-Length.
+async fn read_response(stream: &mut TcpStream) -> Result<u16, ProxyError> {
     let mut reader = BufReader::new(&mut *stream);
     let mut status_line = String::new();
     reader.read_line(&mut status_line).await?;
 
     let status = parse_status_line(&status_line)?;
 
-    // Consume remaining headers until empty line
+    // Consume remaining headers until empty line, tracking Content-Length
+    let mut content_length: u64 = 0;
     loop {
         let mut line = String::new();
         reader.read_line(&mut line).await?;
         if line == "\r\n" || line == "\n" || line.is_empty() {
             break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            if key.trim().eq_ignore_ascii_case("content-length") {
+                if let Ok(len) = value.trim().parse::<u64>() {
+                    content_length = len;
+                }
+            }
+        }
+    }
+
+    // Consume response body so the stream is clean for reuse
+    if content_length > 0 {
+        let mut remaining = content_length;
+        let mut buf = [0u8; 4096];
+        while remaining > 0 {
+            let to_read = (remaining as usize).min(buf.len());
+            let n = reader.read(&mut buf[..to_read]).await?;
+            if n == 0 {
+                break;
+            }
+            remaining -= n as u64;
         }
     }
 
